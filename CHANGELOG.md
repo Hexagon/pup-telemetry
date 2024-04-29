@@ -8,7 +8,7 @@ and this project adheres to
 
 ## [1.0.4] - 2024-04-29
 
-- Dependency update
+- Replace FileIPC with Rest API
 
 ## [1.0.3] - 2024-04-29
 
