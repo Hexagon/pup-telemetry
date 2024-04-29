@@ -1,6 +1,6 @@
 {
   "name": "@pup/telemetry",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "exports": {
     ".": "./telemetry.ts"
   },
@@ -13,12 +13,12 @@
   },
   "imports": {
     "@cross/env": "jsr:@cross/env@^1.0.2",
-    "@cross/fs": "jsr:@cross/fs@^0.0.10",
+    "@cross/fs": "jsr:@cross/fs@^0.1.11",
     "@cross/runtime": "jsr:@cross/runtime@^1.0.0",
     "@cross/test": "jsr:@cross/test@^0.0.9",
     "@pup/api-client": "jsr:@pup/api-client@^1.0.0",
     "@pup/api-definitions": "jsr:@pup/api-definitions@^1.0.0",
-    "@pup/common": "jsr:@pup/common@^1.0.2",
+    "@pup/common": "jsr:@pup/common@^1.0.3",
     "@std/assert": "jsr:@std/assert@^0.223.0",
     "@std/async": "jsr:@std/async@^0.223.0",
     "@std/path": "jsr:@std/path@^0.223.0"
