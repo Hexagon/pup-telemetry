@@ -29,11 +29,14 @@
  */
 
 import { EventEmitter, type EventHandler } from "@pup/common/eventemitter";
-import { FileIPC } from "@pup/common/ipc";
-import { cwd, isDir } from "@cross/fs";
+import { cwd } from "@cross/fs";
 import { getEnv } from "@cross/env";
 import { PupRestClient } from "@pup/api-client";
-import type { ApiMemoryUsage, ApiTelemetryData } from "@pup/api-definitions";
+import type {
+  ApiIpcData,
+  ApiMemoryUsage,
+  ApiTelemetryData,
+} from "@pup/api-definitions";
 import { CurrentRuntime, Runtime } from "@cross/runtime";
 
 export class PupTelemetry {
@@ -45,7 +48,7 @@ export class PupTelemetry {
 
   private timer?: number;
   private aborted = false;
-  private ipc?: FileIPC;
+  private ipcClient?: PupRestClient;
 
   /**
    * PupTelemetry singleton instance.
@@ -109,39 +112,27 @@ export class PupTelemetry {
     }
   }
 
-  private async checkIpc() {
-    const pupTempPath = getEnv("PUP_TEMP_STORAGE");
-    const pupProcessId = getEnv("PUP_PROCESS_ID");
-
-    if (pupTempPath && (await isDir(pupTempPath)) && pupProcessId) {
-      const ipcPath = `${pupTempPath}/.${pupProcessId}.ipc`; // Process-specific IPC path
-      // Break out if aborted
-      if (!this.aborted) {
-        this.ipc = new FileIPC(ipcPath);
-
-        // Read incoming messages
-        for await (const messages of this.ipc.receiveData()) {
-          // Break out of the loop if aborted
-          if (this.aborted) break;
-
-          if (messages.length > 0) {
-            // Process messages and emit events
-            for (const message of messages) {
-              try {
-                if (message.data) {
-                  const parsedMessage = JSON.parse(message.data);
-                  this.events.emit(
-                    parsedMessage.event,
-                    parsedMessage.eventData,
-                  );
-                }
-              } catch (_e) {
-                // Ignore errors in message parsing and processing
-              }
-            }
+  private checkIpc() {
+    try {
+      const pupApiHostname = getEnv("PUP_API_HOSTNAME");
+      const pupApiPort = getEnv("PUP_API_PORT");
+      const pupApiToken = getEnv("PUP_API_TOKEN");
+      const pupProcessId = getEnv("PUP_PROCESS_ID");
+      if (pupApiHostname && pupApiPort && pupApiToken) {
+        // Send api request
+        const apiBaseUrl = `http://${pupApiHostname}:${pupApiPort}`;
+        this.ipcClient = new PupRestClient(apiBaseUrl, pupApiToken, true);
+        const ipcHandler: EventHandler<ApiIpcData> = (
+          eventData?: ApiIpcData,
+        ): void => {
+          if (eventData?.target === pupProcessId && eventData?.event) {
+            this.events.emit(eventData?.event, eventData?.eventData);
           }
-        }
+        };
+        this.ipcClient.on("ipc", ipcHandler as EventHandler<unknown>);
       }
+    } catch (_e) {
+      console.error(_e);
     }
   }
 
@@ -187,41 +178,27 @@ export class PupTelemetry {
   async emit<T>(targetProcessId: string, event: string, eventData?: T) {
     // If target is main (pup host process, use the secure rest api), for child-process to child-process
     // use the file based bus
-    if (targetProcessId === "main") {
-      try {
-        const pupApiHostname = getEnv("PUP_API_HOSTNAME");
-        const pupApiPort = getEnv("PUP_API_PORT");
-        const pupApiToken = getEnv("PUP_API_TOKEN");
-        if (pupApiHostname && pupApiPort && pupApiToken) {
-          // Send api request
-          const apiBaseUrl = `http://${pupApiHostname}:${pupApiPort}`;
-          const client = new PupRestClient(apiBaseUrl, pupApiToken);
+    try {
+      const pupApiHostname = getEnv("PUP_API_HOSTNAME");
+      const pupApiPort = getEnv("PUP_API_PORT");
+      const pupApiToken = getEnv("PUP_API_TOKEN");
+      if (pupApiHostname && pupApiPort && pupApiToken) {
+        // Send api request
+        const apiBaseUrl = `http://${pupApiHostname}:${pupApiPort}`;
+        const client = new PupRestClient(apiBaseUrl, pupApiToken);
+        if (targetProcessId === "main") {
           client.sendTelemetry(eventData as ApiTelemetryData);
+        } else {
+          const m: ApiIpcData = {
+            target: targetProcessId,
+            event,
+            eventData,
+          };
+          await client.sendIpc(m);
         }
-      } catch (_e) {
-        console.error(_e);
       }
-    } else {
-      const pupTempPath = getEnv("PUP_TEMP_STORAGE");
-      if (pupTempPath && (await isDir(pupTempPath)) && targetProcessId) {
-        const ipcPath = `${pupTempPath}/.${targetProcessId}.ipc`; // Target process IPC path
-
-        // Create a temporary IPC to send the message
-        const ipc = new FileIPC(ipcPath);
-
-        // Create the message with event and eventData
-        const message = { event, eventData };
-
-        // Send the message to the target process
-        try {
-          await ipc.sendData(JSON.stringify(message));
-        } finally {
-          // Close the temporary IPC
-          ipc.close(true);
-        }
-      } else {
-        // Ignore, process not run by Pup?
-      }
+    } catch (_e) {
+      console.error(_e);
     }
   }
 
@@ -232,8 +209,8 @@ export class PupTelemetry {
       clearTimeout(this.timer);
     }
 
-    if (this.ipc) {
-      this.ipc.close();
+    if (this.ipcClient) {
+      this.ipcClient.close();
     }
 
     this.events.close();
